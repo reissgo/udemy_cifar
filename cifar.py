@@ -2,7 +2,6 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
 import sys
-import matplotlib.gridspec as gridspec
 
 
 def var_info(v):
@@ -41,7 +40,7 @@ def scoop_and_preprocess_data():
 
 
 def build_and_compile_model():
-    global net_design
+    global model
     # build network (model?) - a few cnn layers then normal layers
 
     inp_layer = tf.keras.layers.Input(shape=x_train[0].shape)
@@ -54,18 +53,18 @@ def build_and_compile_model():
     net_layers = tf.keras.layers.Dropout(0.2)(net_layers)
     net_layers = tf.keras.layers.Dense(len(target_set), activation="softmax")(net_layers)
 
-    net_design = tf.keras.models.Model(inp_layer, net_layers)
+    model = tf.keras.models.Model(inp_layer, net_layers)
 
     # compile: i.e. specify the learning mechanism - grad desc and error func sparce-cat-x-ent
 
-    net_design.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=['accuracy'])
+    model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=['accuracy'])
 
 
 def do_the_learning():
     global training_history_data
     # learn! (fit)... specify data and epochs
 
-    training_history_data = net_design.fit(x_train, y_train, validation_data=(x_test, y_test), epochs=7)
+    training_history_data = model.fit(x_train, y_train, validation_data=(x_test, y_test), epochs=7)
 
 
 def show_samples(xarr, yarr, netout):
@@ -150,30 +149,32 @@ def disp_learn_prog(the_loss, the_val_loss, the_accuracy, the_val_accuracy):
     plt.show(block = False)
 
 
+def show_some_sample_images_without_network(n):
+    dummie_out = np.zeros((n, len(target_set)))
+    show_samples(x_test[:n], y_test[:n], dummie_out)
+
+
 scoop_and_preprocess_data()
-show_n = 20
-dummie_out = np.zeros((show_n, len(target_set)))
+show_n = 50
+# show_some_sample_images_without_network(show_n)
 
-#show_an_input_output_pair(x_train[:show_n], y_train[:show_n], dummie_out)
-
-#scratch = input("Learn from scratch?")
+# scratch = input("Learn from scratch?")
 scratch = "n"
 
 if scratch[:1] == "y":
     build_and_compile_model()
     do_the_learning()
-    net_design.save('cifar.h5')
+    model.save('cifar.h5')
     save_learning_history()
-
     disp_learn_prog(training_history_data.history['loss'],
                     training_history_data.history['val_loss'],
                     training_history_data.history['accuracy'],
                     training_history_data.history['val_accuracy'])
 
 else:
-    net_design = tf.keras.models.load_model('cifar.h5')
+    model = tf.keras.models.load_model('cifar.h5')
     loss, val_loss, accuracy, val_accuracy = load_learning_history()
     disp_learn_prog(loss, val_loss, accuracy, val_accuracy)
 
-predicted_answer_as_10_floats = net_design.predict(x_test)
+predicted_answer_as_10_floats = model.predict(x_test)
 show_samples(x_test[:show_n], y_test[:show_n], predicted_answer_as_10_floats)
