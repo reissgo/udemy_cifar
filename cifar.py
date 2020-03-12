@@ -4,6 +4,7 @@ import numpy as np
 import sys
 import matplotlib.gridspec as gridspec
 
+
 def var_info(v):
     if not isinstance(v, str):
         print("The function var_info takes the name of the variable as a string!")
@@ -67,26 +68,26 @@ def do_the_learning():
     training_history_data = net_design.fit(x_train, y_train, validation_data=(x_test, y_test), epochs=7)
 
 
-def show_an_input_output_pair(xarr, yarr, netout):
+def show_samples(xarr, yarr, netout):
     n = xarr.shape[0]
-    rows = 1+int(n/5)
+    rows = 1+int((n-1)/5)
     cols = 5
 
     fig = plt.figure()
     fig.suptitle("A collection of {} images".format(n))
 
-    gridspec_array = fig.add_gridspec(rows*2, cols)
+    gridspec_array = fig.add_gridspec(rows*3, cols)
 
     for i, (x, y, nout) in enumerate(zip(xarr, yarr, netout)):
-        r = int(i/5) * 2
+        r = int(i/5) * 3
         c = i % 5
-        ax = fig.add_subplot(gridspec_array[r, c])
+        ax = fig.add_subplot(gridspec_array[r:r+2, c])
         plt.xlabel("{}: {}".format(y[0], labels[y[0]]))
         plt.xticks([])
         plt.yticks([])
         ax.imshow(x)
 
-        ax = fig.add_subplot(gridspec_array[r+1, c])
+        ax = fig.add_subplot(gridspec_array[r+2, c])
         targ = np.zeros((10,))
         targ[y] = 1
         ax.bar(list(range(10)), targ, color="red")
@@ -101,6 +102,7 @@ def show_an_input_output_pair(xarr, yarr, netout):
 
 def save_learning_history():
     with open('learnhist.txt', 'w') as f:
+        f.write("{}\n".format(len(training_history_data.history['loss'])))
         for elem in training_history_data.history['loss']:
             f.write("{}\n".format(elem))
         for elem in training_history_data.history['val_loss']:
@@ -109,6 +111,44 @@ def save_learning_history():
             f.write("{}\n".format(elem))
         for elem in training_history_data.history['val_accuracy']:
             f.write("{}\n".format(elem))
+
+
+def load_learning_history():
+    loss, val_loss, accuracy, val_accuracy = [], [], [], []
+    with open('learnhist.txt', 'r') as f:
+        line = f.readline(9999)
+        elems = int(line)
+        for elem in range(elems):
+            line = f.readline(9999)
+            loss.append(float(line))
+        for elem in range(elems):
+            line = f.readline(9999)
+            val_loss.append(float(line))
+        for elem in range(elems):
+            line = f.readline(9999)
+            accuracy.append(float(line))
+        for elem in range(elems):
+            line = f.readline(9999)
+            val_accuracy.append(float(line))
+    return loss, val_loss, accuracy, val_accuracy
+
+
+def disp_learn_prog(the_loss, the_val_loss, the_accuracy, the_val_accuracy):
+    plt.suptitle("Learning history")
+    plt.subplot(1, 2, 1)
+    plt.title("loss measure...\n...the thing we try and minismise during learning")
+    plt.plot(the_loss, label="loss (Sparse Cat X Ent)")
+    plt.plot(the_val_loss, label='validation loss (Sparse Cat X Ent)')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.title("Accuracy... the fraction we get correct")
+    plt.plot(the_accuracy, label='accuracy')
+    plt.plot(the_val_accuracy, label='validation accuracy')
+
+    plt.legend()
+    plt.show(block = False)
+
 
 scoop_and_preprocess_data()
 show_n = 20
@@ -125,19 +165,15 @@ if scratch[:1] == "y":
     net_design.save('cifar.h5')
     save_learning_history()
 
-    plt.subplot(1, 2, 1)
-    plt.plot(training_history_data.history['loss'], label="loss (Sparse Cat X Ent)")
-    plt.plot(training_history_data.history['val_loss'], label='validation loss (Sparse Cat X Ent)')
-    plt.legend()
+    disp_learn_prog(training_history_data.history['loss'],
+                    training_history_data.history['val_loss'],
+                    training_history_data.history['accuracy'],
+                    training_history_data.history['val_accuracy'])
 
-    plt.subplot(1, 2, 2)
-    plt.plot(training_history_data.history['accuracy'], label='accuracy')
-    plt.plot(training_history_data.history['val_accuracy'], label='validation accuracy')
-
-    plt.legend()
-    plt.show()
 else:
     net_design = tf.keras.models.load_model('cifar.h5')
+    loss, val_loss, accuracy, val_accuracy = load_learning_history()
+    disp_learn_prog(loss, val_loss, accuracy, val_accuracy)
 
 predicted_answer_as_10_floats = net_design.predict(x_test)
-show_an_input_output_pair(x_test[:show_n], y_test[:show_n], predicted_answer_as_10_floats)
+show_samples(x_test[:show_n], y_test[:show_n], predicted_answer_as_10_floats)
