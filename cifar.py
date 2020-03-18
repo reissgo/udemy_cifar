@@ -2,6 +2,8 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
 import sys
+import datetime
+import time
 
 
 def var_info(v):
@@ -11,32 +13,70 @@ def var_info(v):
     print("{} is of type {} with shape {}".format(v, eval("type({})".format(v)), eval("{}.shape".format(v))))
 
 
-def scoop_and_preprocess_data():
-    global cifar_data, x_train, x_test, y_train, y_test, target_set
+def prepare_for_fewer_categories():
     global labels
+    global sub_selection
+    global num_catagories_in_use
 
     # labels scooped from https://github.com/zalandoresearch/fashion-mnist
-    labels = ["airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"]
+    org_labels = ["airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"]
+    sub_selection = [3, 5]
+    num_catagories_in_use = len(sub_selection)
+    labels = []
+    for i in sub_selection:
+        labels.append(org_labels[i])
+    print("Now only training net to recognise the following items: ", labels)
+
+
+def convert_data_to_fewer_categories(x_trainZ, y_trainZ):
+    global num_catagories_in_use
+    x_t = np.array([])
+    y_t = np.array([])
+
+    hitctr = 0
+    for i, (xelem, yelem) in enumerate(zip(x_trainZ, y_trainZ)):
+        if i > 0 and (i % 5000) == 0:
+            print(i)
+        if yelem[0] in sub_selection:
+            if hitctr == 0:
+
+                y_t = yelem.copy()
+                x_t = xelem.copy()
+
+                x_t = np.reshape(x_t, [1, 32, 32, 3])
+                y_t = np.reshape(y_t, [1, 1])
+                print("!")
+            else:
+                x_t = np.vstack([x_t, np.reshape(xelem, [1, 32, 32, 3])])
+                y_t = np.vstack([y_t, np.reshape(yelem, [1, 1])])
+
+            hitctr += 1
+
+    for elem in y_t:
+        for i, e in enumerate(sub_selection):
+            if elem[0] == e:
+                elem[0] = i
+                break
+
+    return x_t, y_t
+
+
+def scoop_and_preprocess_data():
+    global cifar_data, x_train, x_test, y_train, y_test
+    global labels
+    global x_t, y_t
+    global num_catagories_in_use
 
     # grab fashion mnist data - in some custome class
 
     cifar_data = tf.keras.datasets.cifar10
-
-
-
-    # pull out train and test in/out numpy arrays from class
-
     (x_train, y_train), (x_test, y_test) = cifar_data.load_data()
 
-    # get feel for size and shape of things
+    #shrink_training_data(200)
 
-    var_info("x_train")
-    var_info("y_train")
-
-    target_set = set(y_train.reshape(-1,))
-
-    print("Num unique targets appears to be {}".format(len(target_set)))
-    print(target_set)
+    prepare_for_fewer_categories()
+    x_train, y_train = convert_data_to_fewer_categories(x_train, y_train)
+    x_test, y_test = convert_data_to_fewer_categories(x_test, y_test)
 
 
 def build_and_compile_model():
@@ -44,14 +84,16 @@ def build_and_compile_model():
     # build network (model?) - a few cnn layers then normal layers
 
     inp_layer = tf.keras.layers.Input(shape=x_train[0].shape)
-    net_layers = tf.keras.layers.Conv2D(29, (3, 3), strides=2, activation="relu")(inp_layer)
-    net_layers = tf.keras.layers.Conv2D(68, (3, 3), strides=2, activation="relu")(inp_layer)
-    net_layers = tf.keras.layers.Conv2D(108, (3, 3), strides=2, activation="relu")(inp_layer)
-    net_layers = tf.keras.layers.Flatten()(net_layers)
-    net_layers = tf.keras.layers.Dropout(0.2)(net_layers)
-    net_layers = tf.keras.layers.Dense(400, activation="relu")(net_layers)
-    net_layers = tf.keras.layers.Dropout(0.2)(net_layers)
-    net_layers = tf.keras.layers.Dense(len(target_set), activation="softmax")(net_layers)
+    with tf.name_scope("Convolutional layers"):
+        net_layers = tf.keras.layers.Conv2D(29, (3, 3), padding='same', activation="relu", name="first_conv")(inp_layer)
+        net_layers = tf.keras.layers.Conv2D(68, (3, 3), padding='same', activation="relu", name="second_conv")(net_layers)
+        net_layers = tf.keras.layers.Conv2D(108, (3, 3), padding='same', activation="relu", name="third_conv")(net_layers)
+        net_layers = tf.keras.layers.Flatten()(net_layers)
+        net_layers = tf.keras.layers.Dropout(0.2)(net_layers)
+    with tf.name_scope("Dense layers"):
+        net_layers = tf.keras.layers.Dense(400, activation="relu", name="first_dense")(net_layers)
+        net_layers = tf.keras.layers.Dropout(0.2)(net_layers)
+        net_layers = tf.keras.layers.Dense(num_catagories_in_use, activation="softmax", name="second_dense_ie_the_output")(net_layers)
 
     model = tf.keras.models.Model(inp_layer, net_layers)
 
@@ -60,20 +102,31 @@ def build_and_compile_model():
     model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=['accuracy'])
 
 
-def do_the_learning():
+def do_the_learning(ep):
     global training_history_data
+
+    log_dir = "logs" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    print("log_dir is [{}]".format(log_dir))
+
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
     # learn! (fit)... specify data and epochs
 
-    training_history_data = model.fit(x_train, y_train, validation_data=(x_test, y_test), epochs=7)
+    training_history_data = model.fit(x_train,
+                                      y_train,
+                                      validation_data=(x_test, y_test),
+                                      epochs=ep,
+                                      callbacks=[tensorboard_callback])
 
 
-def show_samples(xarr, yarr, netout):
+def show_samples(tit, xarr, yarr, netout):
     n = xarr.shape[0]
     rows = 1+int((n-1)/5)
     cols = 5
 
     fig = plt.figure()
-    fig.suptitle("A collection of {} images".format(n))
+    fig.suptitle("A collection of {} '{}' images".format(n, tit))
 
     gridspec_array = fig.add_gridspec(rows*3, cols)
 
@@ -87,16 +140,20 @@ def show_samples(xarr, yarr, netout):
         ax.imshow(x)
 
         ax = fig.add_subplot(gridspec_array[r+2, c])
-        targ = np.zeros((10,))
+        targ = np.zeros((num_catagories_in_use,))
         targ[y] = 1
-        ax.bar(list(range(10)), targ, color="red")
-        ax.bar(list(range(10)), nout, color="green")
-        plt.xticks(list(range(10)), labels=list(range(10)))
+        ax.bar(list(range(num_catagories_in_use)), targ, color="red")
+        ax.bar(list(range(num_catagories_in_use)), nout, color="green")
+        plt.xticks(list(range(num_catagories_in_use)), labels=list(range(num_catagories_in_use)))
         plt.yticks([])
         ax.set_ylim([0, 1])
         ax.set_xlim([-.5, 9.5])
 
     plt.show()
+    #plt.show(block=False)
+    #plt.ion()
+    #plt.pause(0.1)
+    #plt.ioff()
 
 
 def save_learning_history():
@@ -150,31 +207,74 @@ def disp_learn_prog(the_loss, the_val_loss, the_accuracy, the_val_accuracy):
 
 
 def show_some_sample_images_without_network(n):
-    dummie_out = np.zeros((n, len(target_set)))
-    show_samples(x_test[:n], y_test[:n], dummie_out)
+    dummie_out = np.zeros((n, num_catagories_in_use))
+    show_samples("Training data",x_train[:n], y_train[:n], dummie_out)
+    show_samples("Testing data", x_test[:n], y_test[:n], dummie_out)
 
 
-scoop_and_preprocess_data()
+def shrink_training_data(n):
+    global x_train, y_train, shrunk
+    shrunk = True
+    x_train = x_train[:n]
+    y_train = y_train[:n]
+
+
+def print_any_warnings():
+    global shrunk
+    if shrunk:
+        print("SHRINKING TRAINING DATA FOR QUICK TEST!!!!")
+        print("SHRINKING TRAINING DATA FOR QUICK TEST!!!!")
+        print("SHRINKING TRAINING DATA FOR QUICK TEST!!!!")
+        print("SHRINKING TRAINING DATA FOR QUICK TEST!!!!")
+
+
+def save_data_already_processed():
+    np.save("x_train.npy", x_train)
+    np.save("y_train.npy", y_train)
+    np.save("x_test.npy", x_test)
+    np.save("y_test.npy", y_test)
+
+
+def load_data_already_processed():
+    global x_train, x_test, y_train, y_test
+    x_train = np.load("x_train.npy")
+    y_train = np.load("y_train.npy")
+    x_test = np.load("x_test.npy")
+    y_test = np.load("y_test.npy")
+
+shrunk = False
+
+if False:
+    scoop_and_preprocess_data()
+    save_data_already_processed()
+    print_any_warnings()
+    print("Data loaded, preprocess and saved")
+else:
+    prepare_for_fewer_categories()
+    load_data_already_processed()
+    print("Preprocessed data loaded")
+
 show_n = 50
-# show_some_sample_images_without_network(show_n)
+show_some_sample_images_without_network(show_n)
 
 # scratch = input("Learn from scratch?")
-scratch = "n"
+scratch = "y"
 
 if scratch[:1] == "y":
     build_and_compile_model()
-    do_the_learning()
+    do_the_learning(8)
     model.save('cifar.h5')
     save_learning_history()
     disp_learn_prog(training_history_data.history['loss'],
                     training_history_data.history['val_loss'],
                     training_history_data.history['accuracy'],
                     training_history_data.history['val_accuracy'])
-
 else:
     model = tf.keras.models.load_model('cifar.h5')
     loss, val_loss, accuracy, val_accuracy = load_learning_history()
     disp_learn_prog(loss, val_loss, accuracy, val_accuracy)
 
+
 predicted_answer_as_10_floats = model.predict(x_test)
-show_samples(x_test[:show_n], y_test[:show_n], predicted_answer_as_10_floats)
+show_samples("After training process",x_test[:show_n], y_test[:show_n], predicted_answer_as_10_floats)
+input("Now PAK to end the program")
