@@ -72,40 +72,66 @@ def scoop_and_preprocess_data():
     cifar_data = tf.keras.datasets.cifar10
     (x_train, y_train), (x_test, y_test) = cifar_data.load_data()
 
-    #shrink_training_data(200)
+    # shrink_training_data(100)
 
     prepare_for_fewer_categories()
     x_train, y_train = convert_data_to_fewer_categories(x_train, y_train)
     x_test, y_test = convert_data_to_fewer_categories(x_test, y_test)
 
 
-def build_and_compile_model():
+def build_and_compile_model(size_of_first_dense_layer_param):
     global model
     # build network (model?) - a few cnn layers then normal layers
 
-    inp_layer = tf.keras.layers.Input(shape=x_train[0].shape)
+    INPUT_LAYER = tf.keras.layers.Input(shape=x_train[0].shape)
     with tf.name_scope("Convolutional layers"):
-        net_layers = tf.keras.layers.Conv2D(29, (3, 3), padding='same', activation="relu", name="first_conv")(inp_layer)
-        net_layers = tf.keras.layers.Conv2D(68, (3, 3), padding='same', activation="relu", name="second_conv")(net_layers)
-        net_layers = tf.keras.layers.Conv2D(108, (3, 3), padding='same', activation="relu", name="third_conv")(net_layers)
+        net_layers = tf.keras.layers.Conv2D(32, (3, 3), padding='same', activation="relu", name="C32_A")(INPUT_LAYER)
+        net_layers = tf.keras.layers.BatchNormalization()(net_layers)
+        net_layers = tf.keras.layers.Conv2D(32, (3, 3), padding='same', activation="relu", name="C_32_B")(net_layers)
+        net_layers = tf.keras.layers.BatchNormalization()(net_layers)
+        net_layers = tf.keras.layers.MaxPooling2D((2,2))(net_layers)
+
+        net_layers = tf.keras.layers.Conv2D(64, (3, 3), padding='same', activation="relu", name="C_64_A")(net_layers)
+        net_layers = tf.keras.layers.BatchNormalization()(net_layers)
+        net_layers = tf.keras.layers.Conv2D(64, (3, 3), padding='same', activation="relu", name="C_64_B")(net_layers)
+        net_layers = tf.keras.layers.BatchNormalization()(net_layers)
+        net_layers = tf.keras.layers.MaxPooling2D((2,2))(net_layers)
+
+        net_layers = tf.keras.layers.Conv2D(128, (3, 3), padding='same', activation="relu", name="C_128_A")(net_layers)
+        net_layers = tf.keras.layers.BatchNormalization()(net_layers)
+        net_layers = tf.keras.layers.Conv2D(128, (3, 3), padding='same', activation="relu", name="C_128_B")(net_layers)
+        net_layers = tf.keras.layers.BatchNormalization()(net_layers)
+        net_layers = tf.keras.layers.MaxPooling2D((2,2))(net_layers)
+
         net_layers = tf.keras.layers.Flatten()(net_layers)
         net_layers = tf.keras.layers.Dropout(0.2)(net_layers)
     with tf.name_scope("Dense layers"):
-        net_layers = tf.keras.layers.Dense(400, activation="relu", name="first_dense")(net_layers)
+        net_layers = tf.keras.layers.Dense(size_of_first_dense_layer_param, activation="relu", name="dense_1000")(net_layers)
         net_layers = tf.keras.layers.Dropout(0.2)(net_layers)
         net_layers = tf.keras.layers.Dense(num_catagories_in_use, activation="softmax", name="second_dense_ie_the_output")(net_layers)
 
-    model = tf.keras.models.Model(inp_layer, net_layers)
+    model = tf.keras.models.Model(INPUT_LAYER, net_layers)
 
     # compile: i.e. specify the learning mechanism - grad desc and error func sparce-cat-x-ent
 
     model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=['accuracy'])
 
+    model.summary()
 
-def do_the_learning(ep):
+    '''
+    # https://keras.io/utils/#plot_model
+    # seems to need graphviz installed (not a python library)
+    tf.keras.utils.plot_model(
+        model, to_file='model.png', show_shapes=True, show_layer_names=True,
+        rankdir='TB', expand_nested=False, dpi=96)
+    '''
+
+
+def do_the_learning(ep, logdirname):
     global training_history_data
 
-    log_dir = "logs" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    # log_dir = "logs" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_dir = logdirname
 
     print("log_dir is [{}]".format(log_dir))
 
@@ -189,7 +215,7 @@ def load_learning_history():
     return loss, val_loss, accuracy, val_accuracy
 
 
-def disp_learn_prog(the_loss, the_val_loss, the_accuracy, the_val_accuracy):
+def display_learning_progression(the_loss, the_val_loss, the_accuracy, the_val_accuracy):
     plt.suptitle("Learning history")
     plt.subplot(1, 2, 1)
     plt.title("loss measure...\n...the thing we try and minismise during learning")
@@ -242,8 +268,16 @@ def load_data_already_processed():
     x_test = np.load("x_test.npy")
     y_test = np.load("y_test.npy")
 
-shrunk = False
 
+def hyperstring(ep, size_of_first_dense_layer_param):
+    ans = "logs"
+    ans += "_ep{:02d}".format(ep)
+    ans += "_fd{:04d}".format(size_of_first_dense_layer_param)
+    return ans
+
+
+# get the training data
+shrunk = False
 if False:
     scoop_and_preprocess_data()
     save_data_already_processed()
@@ -255,24 +289,32 @@ else:
     print("Preprocessed data loaded")
 
 show_n = 50
-show_some_sample_images_without_network(show_n)
+# show_some_sample_images_without_network(show_n)
 
-# scratch = input("Learn from scratch?")
-scratch = "y"
+learn_from_scratch = True  # input("Learn from scratch? ")[:1].lower() =='y'
 
-if scratch[:1] == "y":
-    build_and_compile_model()
-    do_the_learning(8)
-    model.save('cifar.h5')
-    save_learning_history()
-    disp_learn_prog(training_history_data.history['loss'],
-                    training_history_data.history['val_loss'],
-                    training_history_data.history['accuracy'],
-                    training_history_data.history['val_accuracy'])
+
+if learn_from_scratch:
+
+    size_of_first_dense_layer_list = [50, 100 , 150, 200]
+
+    doing_hyperperameter_truning = True
+    epochs = 12
+    for size_of_first_dense_layer in size_of_first_dense_layer_list:
+        build_and_compile_model(size_of_first_dense_layer)
+        logname = hyperstring(epochs, size_of_first_dense_layer)
+        do_the_learning(epochs, logname)
+        model.save('cifar{}.h5'.format(logname))
+        if not doing_hyperperameter_truning:
+            save_learning_history()
+            display_learning_progression(training_history_data.history['loss'],
+                                         training_history_data.history['val_loss'],
+                                         training_history_data.history['accuracy'],
+                                             training_history_data.history['val_accuracy'])
 else:
     model = tf.keras.models.load_model('cifar.h5')
     loss, val_loss, accuracy, val_accuracy = load_learning_history()
-    disp_learn_prog(loss, val_loss, accuracy, val_accuracy)
+    display_learning_progression(loss, val_loss, accuracy, val_accuracy)
 
 
 predicted_answer_as_10_floats = model.predict(x_test)
